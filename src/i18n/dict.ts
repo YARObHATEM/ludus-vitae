@@ -389,6 +389,64 @@ export const DICT: Dict = {
   "set.oracleConn": { en: "Oracle", ar: "العرّاف" },
   "set.connected": { en: "CONNECTED (READ-ONLY)", ar: "متصل (قراءة فقط)" },
   "set.offline": { en: "OFFLINE DETERMINISTIC", ar: "حتمي دون إنترنت" },
+
+  // ---- quests -------------------------------------------------------------
+  "q.title": { en: "Quests", ar: "المهام" },
+  "q.sub": { en: "one-shot goals — pure reward, no punishment. Abandoning costs nothing.", ar: "أهداف لمرة واحدة — مكافأة خالصة بلا عقاب. التخلي لا يكلّف شيئًا." },
+  "q.new": { en: "New Quest", ar: "مهمة جديدة" },
+  "q.name": { en: "Quest Title", ar: "عنوان المهمة" },
+  "q.deadline": { en: "Deadline (optional)", ar: "الموعد النهائي (اختياري)" },
+  "q.deadlineHint": { en: "A late quest still counts — at half the momentum reward. Never a penalty.", ar: "المهمة المتأخرة تُحسب — بنصف مكافأة الزخم. لا عقوبة أبدًا." },
+  "q.fulfill": { en: "Fulfill", ar: "أنجِز" },
+  "q.abandon": { en: "Abandon", ar: "تخلَّ" },
+  "q.take": { en: "Take Quest", ar: "خُذ المهمة" },
+  "q.overdue": { en: "OVERDUE", ar: "متأخر" },
+  "q.reward": { en: "reward", ar: "المكافأة" },
+  "q.none": { en: "No open quests. A quest is a goal you take once and fulfill once — not a habit.", ar: "لا مهام مفتوحة. المهمة هدف تأخذه مرة وتنجزه مرة — ليست عادة." },
+  "q.fulfilled": { en: "QUEST FULFILLED", ar: "أُنجِزت المهمة" },
+  "q.late": { en: "late — half yield", ar: "متأخرة — نصف العائد" },
+
+  // ---- rest days ------------------------------------------------------------
+  "rest.declare": { en: "Declare Rest Day", ar: "أعلن يوم راحة" },
+  "rest.tokens": { en: "rest tokens", ar: "رموز الراحة" },
+  "rest.today": { en: "Today", ar: "اليوم" },
+  "rest.tomorrow": { en: "Tomorrow", ar: "غدًا" },
+  "rest.activeBanner": { en: "A DECLARED REST DAY — the night will waive every penalty. Breathe.", ar: "يوم راحة مُعلَن — سيُعفي الليل من كل عقوبة. تنفَّس." },
+  "rest.tomorrowNote": { en: "Tomorrow is declared rest.", ar: "غدٌ يوم راحة مُعلَن." },
+  "rest.confirmTitle": { en: "Declare a Rest Day?", ar: "أتعلن يوم راحة؟" },
+  "rest.confirmBody": {
+    en: "On a rest day the night waives all penalties: no misses, no friction, no decay. Nothing is gained either. Tokens are limited per chapter — rest is protection, not escape.",
+    ar: "في يوم الراحة يُعفي الليل من كل العقوبات: لا تفويت، لا احتكاك، لا تآكل. ولا مكاسب أيضًا. الرموز محدودة لكل فصل — الراحة حماية لا هروب.",
+  },
+
+  // ---- journal ---------------------------------------------------------------
+  "nav.journal": { en: "Journal", ar: "اليوميات" },
+  "j.sub": { en: "words, not numbers — this page never touches a formula", ar: "كلمات لا أرقام — هذه الصفحة لا تمسّ أي معادلة" },
+  "j.placeholder": { en: "Write what actually happened today — the honest version…", ar: "اكتب ما حدث فعلًا اليوم — النسخة الصادقة…" },
+  "j.save": { en: "Record Entry", ar: "سجّل الكتابة" },
+  "j.tag": { en: "Tag (optional)", ar: "وسم (اختياري)" },
+  "j.reflect": { en: "Let the Oracle read this", ar: "دَع العرّاف يقرأ هذا" },
+  "j.reflecting": { en: "The Oracle reads…", ar: "العرّاف يقرأ…" },
+  "j.empty": { en: "No entries yet. The first honest page is the hardest.", ar: "لا مدوّنات بعد. الصفحة الصادقة الأولى هي الأصعب." },
+  "j.recorded": { en: "ENTRY RECORDED", ar: "سُجِّلت الكتابة" },
+
+  // ---- difficulty ---------------------------------------------------------
+  "diff.label": { en: "Difficulty", ar: "الصعوبة" },
+  "diff.casual": { en: "Casual — gentler decay, 6 rest tokens", ar: "هادئ — تآكل ألطف، ٦ رموز راحة" },
+  "diff.standard": { en: "Standard — the canonical laws", ar: "قياسي — القوانين الأصلية" },
+  "diff.brutal": { en: "Brutal — harsher decay, 2 rest tokens", ar: "قاسٍ — تآكل أعنف، رمزا راحة" },
+  "diff.hint": {
+    en: "Changes how hard misses hit (momentum decay and friction interest) and how many rest tokens each chapter grants. Applies from the next night close.",
+    ar: "تغيّر شدّة أثر التفويت (تآكل الزخم وفائدة الاحتكاك) وعدد رموز الراحة لكل فصل. تسري من إغلاق الليلة القادمة.",
+  },
+
+  // ---- misc new ---------------------------------------------------------
+  "focus.enter": { en: "Focus Mode", ar: "وضع التركيز" },
+  "focus.exit": { en: "ESC to exit", ar: "ESC للخروج" },
+  "heat.title": { en: "The Year at a Glance", ar: "السنة في نظرة" },
+  "boss.standing": { en: "Standing", ar: "صامد" },
+  "boss.wounded": { en: "Wounded", ar: "جريح" },
+  "boss.desperate": { en: "Desperate", ar: "يائس" },
 };
 
 export function translate(lang: Lang, key: string): string {

@@ -1,8 +1,8 @@
 /** App chrome: sidebar navigation, top metrics bar, toast rack. */
 import React, { useState } from "react";
 import {
-  BookOpen, Castle, Compass, FlaskConical, Landmark, ScrollText, Settings2,
-  Sword, User, Scale,
+  BookOpen, Castle, Compass, Feather, FlaskConical, Landmark, ScrollText,
+  Settings2, Sword, User, Scale,
 } from "lucide-react";
 import { useSystem } from "../state/SystemProvider";
 import { useI18n } from "../i18n/I18nProvider";
@@ -16,6 +16,7 @@ const NAV: { key: ViewKey; tkey: string; icon: React.ReactNode }[] = [
   { key: "campaign", tkey: "nav.campaign", icon: <Castle /> },
   { key: "character", tkey: "nav.character", icon: <User /> },
   { key: "arsenal", tkey: "nav.arsenal", icon: <Sword /> },
+  { key: "journal", tkey: "nav.journal", icon: <Feather /> },
   { key: "chronicle", tkey: "nav.chronicle", icon: <ScrollText /> },
   { key: "oracle", tkey: "nav.oracle", icon: <FlaskConical /> },
   { key: "settings", tkey: "nav.settings", icon: <Settings2 /> },

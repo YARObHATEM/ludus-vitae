@@ -38,6 +38,22 @@ export function ChroniclePage() {
       </div>
 
       <div className="panel">
+        <div className="panel-title">{t("heat.title")}</div>
+        <div className="heatmap" style={{ marginTop: 12, overflowX: "auto", paddingBottom: 4 }}>
+          {days.map((d) => {
+            const cls = d.misses > 0 && d.executions === 0
+              ? "miss"
+              : d.executions >= 5 ? "h4"
+              : d.executions >= 3 ? "h3"
+              : d.executions >= 2 ? "h2"
+              : d.executions >= 1 ? "h1"
+              : "";
+            return <div key={d.day_key} className={`heat-cell ${cls}`} title={`${d.day_key}: ${d.executions}⚔ ${d.misses}✗`} />;
+          })}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-title">{t("chron.recordedDays")}</div>
         <div className="panel-sub">
           <span className="mono-latin">{days.length}</span> {t("chron.closedDays")} · <span className="mono-latin">{days.filter((d) => d.perfect).length}</span> {t("chron.perfect")} ·{" "}

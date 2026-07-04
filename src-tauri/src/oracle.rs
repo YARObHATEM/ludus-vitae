@@ -387,6 +387,74 @@ pub async fn propose_milestones_remote(
     Ok(proposals)
 }
 
+// ---------------------------------------------------------------------------
+// Journal reflection — the Oracle reads your words. Read-only, as always.
+// ---------------------------------------------------------------------------
+
+pub async fn reflect_on_journal_remote(
+    model: &str,
+    api_key: &str,
+    entry: &str,
+    snap: &SystemSnapshot,
+) -> Result<String, String> {
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+        model, api_key
+    );
+    let body = json!({
+        "system_instruction": { "parts": [{ "text": persona_prompt("ORACLE") }] },
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": format!(
+                "The operator wrote this journal entry today. Read it against his live state snapshot and answer with ONE short reflection (max 350 characters): honest, grounded, neither flattery nor cruelty. If the words and the numbers disagree, say so.\n\nJOURNAL ENTRY:\n{}\n\nSTATE SNAPSHOT:\n{}",
+                entry,
+                serde_json::to_string(&state_wrapper(snap)).unwrap_or_default()
+            )}]
+        }],
+        "generationConfig": { "temperature": 0.8, "maxOutputTokens": 300 }
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|e| format!("HTTP client construction failed: {e}"))?;
+    let payload = post_with_retry(&client, &url, &body).await?;
+    let text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .ok_or_else(|| "The bridge response held no content.".to_string())?;
+    let mut out = text.trim().to_string();
+    if out.chars().count() > 400 {
+        out = out.chars().take(397).collect::<String>() + "...";
+    }
+    if out.is_empty() {
+        return Err("Empty reflection.".into());
+    }
+    Ok(out)
+}
+
+/// Offline reflection: deterministic, brief, honest — an acknowledgment plus
+/// one observation drawn from the same state the Oracle always reads.
+pub fn reflect_on_journal_local(entry: &str, snap: &SystemSnapshot) -> String {
+    let m = snap.profile.momentum;
+    let observation = if m < 1.0 {
+        format!(
+            "The ledger notes momentum at {:.2} while you wrote this — read your own words again tomorrow and see if they still hold.",
+            m
+        )
+    } else {
+        format!(
+            "Momentum stands at {:.2}; the words and the numbers point the same way today. Keep both honest.",
+            m
+        )
+    };
+    let variants = [
+        "Recorded. Words are cheap until the ledger agrees with them.",
+        "Recorded. What you wrote is now part of the record — the record does not blink.",
+        "Recorded. A man who writes to himself is at least no longer hiding.",
+    ];
+    let idx = (crate::formulas::fnv1a(entry) % variants.len() as u64) as usize;
+    format!("{} {}", variants[idx], observation)
+}
+
 fn normalize_persona(p: &str) -> String {
     let up = p.to_uppercase();
     if PERSONAS.contains(&up.as_str()) {

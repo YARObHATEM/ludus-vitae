@@ -1,6 +1,6 @@
 [package]
 name = "ludus-vitae"
-version = "1.0.0"
+version = "1.1.0"
 description = "Ludus Vitae — local-first deterministic life engine"
 authors = ["The Operator"]
 edition = "2021"

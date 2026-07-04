@@ -4,6 +4,7 @@ export type ViewKey =
   | "campaign"
   | "character"
   | "arsenal"
+  | "journal"
   | "chronicle"
   | "oracle"
   | "settings";

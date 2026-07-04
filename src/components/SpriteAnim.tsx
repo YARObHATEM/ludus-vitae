@@ -41,6 +41,14 @@ export const PERSONA_SHEETS: Record<string, SheetDef> = {
   KALDOR: SHEETS.hound,
 };
 
+/** Wound tier for a boss portrait frame: '' | 'wounded' | 'desperate'. */
+export function woundClass(completion: number, defeated: boolean): string {
+  if (defeated) return "";
+  if (completion >= 0.66) return " desperate";
+  if (completion >= 0.33) return " wounded";
+  return "";
+}
+
 export function SpriteAnim(props: { sheet: SheetDef; height?: number; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null);
   const s = props.sheet;

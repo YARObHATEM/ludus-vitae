@@ -54,6 +54,7 @@ pub struct RawProfile {
     pub cycle_count: i64,
     pub last_processed_day: NaiveDate,
     pub last_reckoning_day: Option<NaiveDate>,
+    pub rest_tokens: i64,
     pub genesis_complete: bool,
     pub created_at: String,
 }
@@ -176,7 +177,7 @@ pub fn load_profile(conn: &Connection) -> EResult<RawProfile> {
         "SELECT name, oath, environment_text, threats_text, current_level,
                 xp_str, xp_int, xp_cha, xp_wil, current_stamina, momentum_coefficient,
                 level_started_day, cycle_count, last_processed_day, genesis_complete, created_at,
-                last_reckoning_day
+                last_reckoning_day, rest_tokens
          FROM user_profiles WHERE id = 1",
         [],
         |r| {
@@ -198,6 +199,7 @@ pub fn load_profile(conn: &Connection) -> EResult<RawProfile> {
                 genesis_complete: r.get::<_, i64>(14)? == 1,
                 created_at: r.get(15)?,
                 last_reckoning_day: r.get::<_, Option<String>>(16)?.map(|s| parse_day(&s)),
+                rest_tokens: r.get(17)?,
             })
         },
     )?;
@@ -210,14 +212,15 @@ fn save_profile(conn: &Connection, p: &RawProfile) -> EResult<()> {
             name=?1, oath=?2, environment_text=?3, threats_text=?4, current_level=?5,
             xp_str=?6, xp_int=?7, xp_cha=?8, xp_wil=?9, current_stamina=?10,
             momentum_coefficient=?11, level_started_day=?12, cycle_count=?13,
-            last_processed_day=?14, genesis_complete=?15, last_reckoning_day=?16
+            last_processed_day=?14, genesis_complete=?15, last_reckoning_day=?16,
+            rest_tokens=?17
          WHERE id = 1",
         params![
             p.name, p.oath, p.environment_text, p.threats_text, p.level,
             p.xp_str, p.xp_int, p.xp_cha, p.xp_wil, f::round2(p.stamina),
             f::round2(p.momentum), day_key(p.level_started_day), p.cycle_count,
             day_key(p.last_processed_day), p.genesis_complete as i64,
-            p.last_reckoning_day.map(day_key)
+            p.last_reckoning_day.map(day_key), p.rest_tokens
         ],
     )?;
     Ok(())
@@ -308,6 +311,60 @@ pub fn push_event(conn: &Connection, day: &str, kind: &str, detail: &str) -> ERe
     Ok(())
 }
 
+/// The active difficulty parameters, read from settings (default: standard).
+pub fn difficulty(conn: &Connection) -> f::DifficultyParams {
+    let name = crate::db::get_setting(conn, "difficulty").unwrap_or_else(|| "standard".into());
+    f::difficulty_params(&name)
+}
+
+/// True when the given day was declared a Rest Day.
+pub fn is_rest_day(conn: &Connection, day: NaiveDate) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM rest_days WHERE day_key = ?1",
+        params![day_key(day)],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// Declare a Rest Day (today or tomorrow). Costs one token; declared in
+/// advance or on the day itself — never retroactively. On a rest day the
+/// night close waives every penalty: no misses, no friction, no decay.
+/// Nothing is gained either. Rest is protection, not progress.
+pub fn declare_rest(conn: &Connection, day_offset: i64) -> EResult<()> {
+    if !(0..=1).contains(&day_offset) {
+        return Err(EngineError::Rule("Rest can be declared for today or tomorrow only.".into()));
+    }
+    let mut p = load_profile(conn)?;
+    if !p.genesis_complete {
+        return Err(EngineError::Rule("The Genesis Ritual is not complete.".into()));
+    }
+    if p.rest_tokens <= 0 {
+        return Err(EngineError::Rule(
+            "No rest tokens remain this chapter. The next gate refills them.".into(),
+        ));
+    }
+    let day = Local::now().date_naive() + chrono::Duration::days(day_offset);
+    if is_rest_day(conn, day) {
+        return Err(EngineError::Rule("That day is already declared as rest.".into()));
+    }
+    conn.execute("INSERT INTO rest_days (day_key) VALUES (?1)", params![day_key(day)])?;
+    p.rest_tokens -= 1;
+    save_profile(conn, &p)?;
+    push_event(
+        conn,
+        &day_key(day),
+        "REST",
+        &format!(
+            "Rest declared for {}. The night will waive its penalties. {} token(s) remain.",
+            day_key(day),
+            p.rest_tokens
+        ),
+    )?;
+    Ok(())
+}
+
 /// True while an Ascended boss is alive in the given sector at current level.
 pub fn sector_cursed(conn: &Connection, level: i64, sector: Sector) -> bool {
     conn.query_row(
@@ -376,6 +433,35 @@ fn close_day(conn: &Connection, day: NaiveDate) -> EResult<()> {
     let momentum_open = p.momentum;
     let stamina_open = p.stamina;
 
+    // The Rest Day law: a declared rest waives every penalty — no misses,
+    // no friction growth, no momentum decay, no blade erosion. Full regen.
+    // Nothing is gained; the world simply holds its breath.
+    if is_rest_day(conn, day) {
+        let executions: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM habit_execution_logs WHERE day_key = ?1",
+            params![&dk],
+            |r| r.get(0),
+        )?;
+        let regen = f::stamina_regen(p.momentum, w.state(), false);
+        p.stamina = (p.stamina + regen).clamp(0.0, p.max_stamina());
+        conn.execute(
+            "INSERT OR REPLACE INTO system_days
+                (day_key, executions, misses, momentum_open, momentum_close,
+                 stamina_open, stamina_close, sharpness_close, durability_close, perfect)
+             VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
+            params![
+                dk, executions,
+                f::round2(momentum_open), f::round2(p.momentum),
+                f::round2(stamina_open), f::round2(p.stamina),
+                f::round2(w.sharpness), f::round2(w.durability)
+            ],
+        )?;
+        push_event(conn, &dk, "REST", "A declared rest. The ledger records peace, not debt.")?;
+        save_profile(conn, &p)?;
+        return Ok(());
+    }
+
+    let diff = difficulty(conn);
     let habits = load_habits(conn, false)?;
     let mut missed_weight_sum = 0.0;
     let mut heavy_misses: i64 = 0;
@@ -417,9 +503,9 @@ fn close_day(conn: &Connection, day: NaiveDate) -> EResult<()> {
     )?;
     let had_any_execution = executions > 0;
 
-    // Momentum: multiplicative miss decay, then idle cooling.
+    // Momentum: multiplicative miss decay (difficulty-scaled), then cooling.
     let m_before = p.momentum;
-    p.momentum = f::momentum_after_misses(p.momentum, missed_weight_sum);
+    p.momentum = f::momentum_after_misses_at(p.momentum, missed_weight_sum, diff.miss_decay_base);
     p.momentum = f::momentum_cooling(p.momentum, had_any_execution);
 
     // Sharpness: idle decay and heavy-miss grinding.
@@ -546,7 +632,10 @@ pub fn execute_habit(
         .map_err(EngineError::Rule)?;
 
     let cursed = sector_cursed(&tx, p.level, h.sector);
-    let cost = f::activation_cost(h.weight, h.consecutive_misses, p.momentum, cursed, p.stat_int());
+    let diff = difficulty(&tx);
+    let cost = f::activation_cost_at(
+        h.weight, h.consecutive_misses, p.momentum, cursed, p.stat_int(), diff.friction_base,
+    );
     let overdraft = p.stamina < cost;
     p.stamina = (p.stamina - cost).max(0.0);
 
@@ -1034,6 +1123,7 @@ pub fn run_reckoning(conn: &mut Connection) -> EResult<ReckoningReport> {
             spawn_level_bosses(&tx, new_level)?;
             p.level = new_level;
             p.level_started_day = today;
+            p.rest_tokens = difficulty(&tx).rest_tokens;
             let ldef = catalog::level_def(new_level);
             push_event(&tx, &dk, "LEVEL",
                 &format!("CLEAN CLEAR — the gate opens without debt. Chapter {} begins: {} — {}",
@@ -1104,6 +1194,7 @@ pub fn force_gate(conn: &mut Connection) -> EResult<ForceGateReport> {
     spawn_level_bosses(&tx, new_level)?;
     p.level = new_level;
     p.level_started_day = today;
+    p.rest_tokens = difficulty(&tx).rest_tokens;
     let ldef = catalog::level_def(new_level);
     push_event(&tx, &dk, "LEVEL",
         &format!("THE GATE IS FORCED. Chapter {} begins: {} — {}", new_level, ldef.title, ldef.theme))?;
@@ -1165,9 +1256,11 @@ pub fn genesis_seed(conn: &mut Connection, payload: GenesisPayload) -> EResult<(
         return Err(EngineError::Rule("The Genesis Ritual has already been performed.".into()));
     }
 
+    let tokens = difficulty(&tx).rest_tokens;
     tx.execute(
         "UPDATE user_profiles SET name=?1, oath=?2, environment_text=?3, threats_text=?4,
-            genesis_complete=1, level_started_day=?5, last_processed_day=?5, created_at=?6
+            genesis_complete=1, level_started_day=?5, last_processed_day=?5, created_at=?6,
+            rest_tokens=?7
          WHERE id = 1",
         params![
             payload.name.trim(),
@@ -1175,7 +1268,8 @@ pub fn genesis_seed(conn: &mut Connection, payload: GenesisPayload) -> EResult<(
             payload.environment_text.trim(),
             payload.threats_text.trim(),
             dk,
-            now_ts()
+            now_ts(),
+            tokens
         ],
     )?;
 
@@ -1472,5 +1566,243 @@ pub fn add_milestone(
 
 pub fn mark_events_seen(conn: &Connection) -> EResult<()> {
     conn.execute("UPDATE system_events SET seen = 1 WHERE seen = 0", [])?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Quests — one-shot goals, pure carrot. No deadline punishment, no friction,
+// no rust. An abandoned quest costs nothing but its own absence.
+// ---------------------------------------------------------------------------
+
+pub fn create_quest(conn: &Connection, q: NewQuestPayload) -> EResult<i64> {
+    let p = load_profile(conn)?;
+    if !p.genesis_complete {
+        return Err(EngineError::Rule("Complete the Genesis Ritual first.".into()));
+    }
+    if q.title.trim().is_empty() {
+        return Err(EngineError::Rule("A quest needs a title.".into()));
+    }
+    let active: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM quests WHERE completed_at IS NULL AND is_abandoned = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    if active >= 10 {
+        return Err(EngineError::Rule(
+            "Ten open quests is the ceiling. Finish or abandon one first.".into(),
+        ));
+    }
+    let dk = day_key(Local::now().date_naive());
+    conn.execute(
+        "INSERT INTO quests (title, description, sector_type, weight_class, verification_type, deadline_day, created_day)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            q.title.trim(),
+            q.description.trim(),
+            q.sector.as_db(),
+            q.weight.as_db(),
+            q.verification.as_db(),
+            q.deadline_day,
+            dk
+        ],
+    )?;
+    let id = conn.last_insert_rowid();
+    push_event(conn, &dk, "QUEST", &format!("Quest taken: {}.", q.title.trim()))?;
+    Ok(id)
+}
+
+pub fn complete_quest(
+    conn: &mut Connection,
+    quest_id: i64,
+    proof_path: Option<String>,
+) -> EResult<QuestReport> {
+    let today = Local::now().date_naive();
+    let dk = day_key(today);
+    let tx = conn.transaction()?;
+    let mut p = load_profile(&tx)?;
+
+    let row = tx
+        .query_row(
+            "SELECT title, sector_type, weight_class, verification_type, deadline_day, completed_at, is_abandoned
+             FROM quests WHERE id = ?1",
+            params![quest_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    r.get::<_, i64>(6)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| EngineError::Rule("Unknown quest.".into()))?;
+    let (title, sector_s, weight_s, verif_s, deadline, completed_at, abandoned) = row;
+    if completed_at.is_some() {
+        return Err(EngineError::Rule("This quest is already fulfilled.".into()));
+    }
+    if abandoned == 1 {
+        return Err(EngineError::Rule("This quest was abandoned. Take it again if it still matters.".into()));
+    }
+
+    let verif = VerificationType::from_db(&verif_s);
+    let validated_proof = crate::vault::validate_proof(verif, proof_path.as_deref())
+        .map_err(EngineError::Rule)?;
+
+    let sector = Sector::from_db(&sector_s);
+    let weight = WeightClass::from_db(&weight_s);
+    let late = deadline
+        .as_deref()
+        .map(|d| today > parse_day(d))
+        .unwrap_or(false);
+
+    let momentum_before = p.momentum;
+    p.momentum = f::clamp_momentum(p.momentum + f::quest_momentum_gain(weight, late));
+
+    let xp = f::quest_xp(weight);
+    match sector {
+        Sector::Physical => p.xp_str += xp,
+        Sector::Intellectual => p.xp_int += xp,
+        Sector::Financial => p.xp_cha += xp,
+        Sector::Responsibility => p.xp_wil += xp,
+    }
+    if sector != Sector::Responsibility {
+        p.xp_wil += xp * 0.5;
+    }
+
+    // A fulfilled goal whets the blade twice as hard as a daily rep.
+    let mut w = load_weapon(&tx)?;
+    let gain = f::sharpness_gain(w.sharpness, weight, sector, p.momentum) * 2.0;
+    w.sharpness = (w.sharpness + gain).min(100.0);
+    w.forge_count_total += 1;
+    save_weapon(&tx, &w)?;
+
+    tx.execute(
+        "UPDATE quests SET completed_at = ?1, proof_path = ?2 WHERE id = ?3",
+        params![now_ts(), validated_proof, quest_id],
+    )?;
+    push_event(
+        &tx,
+        &dk,
+        "QUEST",
+        &format!(
+            "Quest fulfilled: {}{}. Momentum {:.2} → {:.2}; {:.0} xp banked.",
+            title,
+            if late { " (late, half yield)" } else { "" },
+            momentum_before,
+            p.momentum,
+            xp
+        ),
+    )?;
+    save_profile(&tx, &p)?;
+
+    let report = QuestReport {
+        quest_id,
+        title,
+        late,
+        momentum_before: f::round2(momentum_before),
+        momentum_after: f::round2(p.momentum),
+        xp_banked: f::round2(xp),
+        sharpness_after: f::round2(w.sharpness),
+    };
+    tx.commit()?;
+    Ok(report)
+}
+
+pub fn abandon_quest(conn: &Connection, quest_id: i64) -> EResult<()> {
+    let n = conn.execute(
+        "UPDATE quests SET is_abandoned = 1 WHERE id = ?1 AND completed_at IS NULL AND is_abandoned = 0",
+        params![quest_id],
+    )?;
+    if n == 0 {
+        return Err(EngineError::Rule("That quest cannot be abandoned.".into()));
+    }
+    push_event(
+        conn,
+        &day_key(Local::now().date_naive()),
+        "QUEST",
+        "A quest was laid down. No penalty — but the ledger remembers what was once wanted.",
+    )?;
+    Ok(())
+}
+
+pub fn load_active_quests(conn: &Connection, today: NaiveDate) -> EResult<Vec<QuestView>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, description, sector_type, weight_class, verification_type,
+                deadline_day, created_day, completed_at, is_abandoned
+         FROM quests WHERE completed_at IS NULL AND is_abandoned = 0 ORDER BY id DESC",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            let deadline: Option<String> = r.get(6)?;
+            let weight = WeightClass::from_db(&r.get::<_, String>(4)?);
+            let overdue = deadline
+                .as_deref()
+                .map(|d| today > parse_day(d))
+                .unwrap_or(false);
+            Ok(QuestView {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                description: r.get(2)?,
+                sector: Sector::from_db(&r.get::<_, String>(3)?),
+                weight,
+                verification: VerificationType::from_db(&r.get::<_, String>(5)?),
+                deadline_day: deadline,
+                created_day: r.get(7)?,
+                completed_at: r.get(8)?,
+                is_abandoned: r.get::<_, i64>(9)? == 1,
+                overdue,
+                momentum_reward: f::quest_momentum_gain(weight, overdue),
+                xp_reward: f::quest_xp(weight),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+// ---------------------------------------------------------------------------
+// The Journal — words, not numbers. Never touches a formula.
+// ---------------------------------------------------------------------------
+
+pub fn add_journal_entry(conn: &Connection, content: &str, sector: Option<Sector>) -> EResult<i64> {
+    if content.trim().is_empty() {
+        return Err(EngineError::Rule("An empty page is not an entry.".into()));
+    }
+    let dk = day_key(Local::now().date_naive());
+    conn.execute(
+        "INSERT INTO journal_entries (ts, day_key, sector_type, content) VALUES (?1, ?2, ?3, ?4)",
+        params![now_ts(), dk, sector.map(|s| s.as_db()), content.trim()],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn load_journal(conn: &Connection, limit: i64, offset: i64) -> EResult<Vec<JournalEntryView>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ts, day_key, sector_type, content, oracle_reflection
+         FROM journal_entries ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![limit.clamp(1, 200), offset.max(0)], |r| {
+            Ok(JournalEntryView {
+                id: r.get(0)?,
+                timestamp: r.get(1)?,
+                day_key: r.get(2)?,
+                sector: r.get::<_, Option<String>>(3)?.map(|s| Sector::from_db(&s)),
+                content: r.get(4)?,
+                oracle_reflection: r.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn store_journal_reflection(conn: &Connection, entry_id: i64, reflection: &str) -> EResult<()> {
+    conn.execute(
+        "UPDATE journal_entries SET oracle_reflection = ?1 WHERE id = ?2",
+        params![reflection, entry_id],
+    )?;
     Ok(())
 }

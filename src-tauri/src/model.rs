@@ -319,6 +319,55 @@ pub struct Projection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestView {
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    pub sector: Sector,
+    pub weight: WeightClass,
+    pub verification: VerificationType,
+    pub deadline_day: Option<String>,
+    pub created_day: String,
+    pub completed_at: Option<String>,
+    pub is_abandoned: bool,
+    /// True when a deadline exists and today is past it (still completable).
+    pub overdue: bool,
+    pub momentum_reward: f64,
+    pub xp_reward: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalEntryView {
+    pub id: i64,
+    pub timestamp: String,
+    pub day_key: String,
+    pub sector: Option<Sector>,
+    pub content: String,
+    pub oracle_reflection: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewQuestPayload {
+    pub title: String,
+    pub description: String,
+    pub sector: Sector,
+    pub weight: WeightClass,
+    pub verification: VerificationType,
+    pub deadline_day: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuestReport {
+    pub quest_id: i64,
+    pub title: String,
+    pub late: bool,
+    pub momentum_before: f64,
+    pub momentum_after: f64,
+    pub xp_banked: f64,
+    pub sharpness_after: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecommendedAction {
     pub habit_id: i64,
     pub habit_name: String,
@@ -342,6 +391,12 @@ pub struct SystemSnapshot {
     pub audio: AudioLaw,
     pub projection: Projection,
     pub recommended: Option<RecommendedAction>,
+    /// Active (uncompleted, unabandoned) quests.
+    pub quests: Vec<QuestView>,
+    pub rest_tokens: i64,
+    pub today_is_rest: bool,
+    pub tomorrow_is_rest: bool,
+    pub difficulty: String,
     pub recent_days: Vec<DayRecord>,
     pub recent_logs: Vec<ExecutionLogView>,
     pub unseen_events: Vec<SystemEvent>,

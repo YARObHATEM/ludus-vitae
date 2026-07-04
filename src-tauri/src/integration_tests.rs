@@ -291,6 +291,111 @@ fn milestones_are_editable_until_sealed() {
 }
 
 #[test]
+fn quests_reward_without_ever_punishing() {
+    let mut conn = fresh_db();
+    genesis(&mut conn);
+    let qid = engine::create_quest(
+        &conn,
+        NewQuestPayload {
+            title: "Ship the demo".into(),
+            description: "".into(),
+            sector: Sector::Financial,
+            weight: WeightClass::Heroic,
+            verification: VerificationType::Manual,
+            deadline_day: None,
+        },
+    )
+    .expect("quest created");
+
+    let before = engine::load_profile(&conn).unwrap();
+    let report = engine::complete_quest(&mut conn, qid, None).expect("quest fulfilled");
+    let after = engine::load_profile(&conn).unwrap();
+    // HEROIC quest: +0.10 × 1.5 = +0.15 momentum, 37.5 CHA xp banked.
+    assert!((report.momentum_after - (before.momentum + 0.15)).abs() < 1e-9);
+    assert!((after.xp_cha - before.xp_cha - 37.5).abs() < 1e-9);
+    assert!(!report.late);
+    // Double completion refused; abandoning a completed quest refused.
+    assert!(engine::complete_quest(&mut conn, qid, None).is_err());
+    assert!(engine::abandon_quest(&conn, qid).is_err());
+
+    // An abandoned quest costs nothing.
+    let q2 = engine::create_quest(&conn, NewQuestPayload {
+        title: "Never mind".into(), description: "".into(), sector: Sector::Physical,
+        weight: WeightClass::Trivial, verification: VerificationType::Manual, deadline_day: None,
+    }).unwrap();
+    let m_before = engine::load_profile(&conn).unwrap().momentum;
+    engine::abandon_quest(&conn, q2).expect("abandon is free");
+    assert!((engine::load_profile(&conn).unwrap().momentum - m_before).abs() < 1e-9);
+}
+
+#[test]
+fn a_declared_rest_day_waives_all_penalties() {
+    let mut conn = fresh_db();
+    genesis(&mut conn);
+    let today = Local::now().date_naive();
+
+    // Rewind: genesis two days ago; declare yesterday as rest retroactively
+    // by inserting directly (the command only allows today/tomorrow — the
+    // engine close must still honor the row regardless of how it got there).
+    let two_ago = today - chrono::Duration::days(2);
+    let yesterday = today - chrono::Duration::days(1);
+    conn.execute(
+        "UPDATE user_profiles SET level_started_day = ?1, last_processed_day = ?1",
+        [engine::day_key(two_ago)],
+    ).unwrap();
+    conn.execute("UPDATE habit_configs SET created_day = ?1", [engine::day_key(two_ago)]).unwrap();
+    conn.execute("INSERT INTO rest_days (day_key) VALUES (?1)", [engine::day_key(yesterday)]).unwrap();
+
+    engine::process_pending_days(&mut conn, today).unwrap();
+    let habits = engine::load_habits(&conn, false).unwrap();
+    // Two closed days; only the non-rest one (two_ago) charges a miss.
+    assert!(habits.iter().all(|h| h.consecutive_misses == 1),
+        "rest day must not add misses: {:?}",
+        habits.iter().map(|h| h.consecutive_misses).collect::<Vec<_>>());
+
+    // Token accounting through the command path.
+    let before = engine::load_profile(&conn).unwrap().rest_tokens;
+    engine::declare_rest(&conn, 0).expect("declare today as rest");
+    assert_eq!(engine::load_profile(&conn).unwrap().rest_tokens, before - 1);
+    assert!(engine::declare_rest(&conn, 0).is_err(), "same day twice refused");
+}
+
+#[test]
+fn difficulty_setting_changes_the_costs() {
+    let mut conn = fresh_db();
+    genesis(&mut conn);
+    conn.execute("UPDATE habit_configs SET consecutive_misses = 3", []).unwrap();
+    let p = engine::load_profile(&conn).unwrap();
+
+    crate::db::set_setting(&conn, "difficulty", "casual").unwrap();
+    let casual = engine::difficulty(&conn);
+    let cost_casual = crate::formulas::activation_cost_at(
+        WeightClass::Heroic, 3, p.momentum, false, p.stat_int(), casual.friction_base);
+
+    crate::db::set_setting(&conn, "difficulty", "brutal").unwrap();
+    let brutal = engine::difficulty(&conn);
+    let cost_brutal = crate::formulas::activation_cost_at(
+        WeightClass::Heroic, 3, p.momentum, false, p.stat_int(), brutal.friction_base);
+
+    assert!(cost_brutal > cost_casual);
+    assert!(brutal.rest_tokens < casual.rest_tokens);
+}
+
+#[test]
+fn journal_holds_words_and_reflections() {
+    let mut conn = fresh_db();
+    genesis(&mut conn);
+    assert!(engine::add_journal_entry(&conn, "   ", None).is_err());
+    let id = engine::add_journal_entry(&conn, "Today the cave felt smaller.", Some(Sector::Intellectual))
+        .expect("entry saved");
+    engine::store_journal_reflection(&conn, id, "Recorded.").unwrap();
+    let entries = engine::load_journal(&conn, 10, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].oracle_reflection.as_deref(), Some("Recorded."));
+    assert_eq!(entries[0].sector, Some(Sector::Intellectual));
+}
+
+#[test]
 fn reset_returns_the_world_to_the_void() {
     let mut conn = fresh_db();
     genesis(&mut conn);

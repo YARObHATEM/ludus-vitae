@@ -1,23 +1,27 @@
 /** TODAY — the Execution Command Center. */
 import React, { useEffect, useState } from "react";
-import { ChevronRight, Crosshair, Skull, Swords } from "lucide-react";
+import { BedDouble, ChevronRight, Crosshair, Maximize2, Skull, Swords } from "lucide-react";
 import { bridge } from "../api/bridge";
+import { audio } from "../audio/engine";
 import { useSystem } from "../state/SystemProvider";
 import { useI18n } from "../i18n/I18nProvider";
 import { Gauge, Modal, ProofField, SectorTag, WeightTag } from "../components/ui";
 import { WorldStrip } from "../components/WorldStrip";
-import { SpriteAnim, bossSheet } from "../components/SpriteAnim";
+import { QuestsPanel } from "../components/Quests";
+import { SpriteAnim, bossSheet, woundClass } from "../components/SpriteAnim";
 import type { OracleResponse } from "../types/contracts";
 import type { HabitView, ViewSetter } from "./pageProps";
 
 export function TodayPage({ setView }: { setView: ViewSetter }) {
-  const { snap, executeHabit } = useSystem();
+  const { snap, executeHabit, refresh, pushToast } = useSystem();
   const { t } = useI18n();
   const [proofFor, setProofFor] = useState<HabitView | null>(null);
   const [proofPath, setProofPath] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [ambient, setAmbient] = useState<OracleResponse | null>(null);
+  const [restConfirm, setRestConfirm] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
 
   const doneCount = snap?.habits.filter((h) => !h.is_archived && h.executed_today).length ?? 0;
 
@@ -48,12 +52,21 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
     }
   };
 
-  // Keyboard warfare: 1–9 executes the nth due directive.
+  // Keyboard warfare: 1–9 executes the nth due directive; F = focus mode.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (proofFor) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Escape" && focusMode) {
+        setFocusMode(false);
+        return;
+      }
+      if (e.key.toLowerCase() === "f") {
+        setFocusMode((v) => !v);
+        audio.uiOpen();
+        return;
+      }
       const n = parseInt(e.key, 10);
       if (n >= 1 && n <= 9) {
         const target = snap.habits.filter((h) => !h.is_archived && h.due_today)[n - 1];
@@ -63,7 +76,19 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap, proofFor]);
+  }, [snap, proofFor, focusMode]);
+
+  const declareRestDay = async (offset: 0 | 1) => {
+    setRestConfirm(false);
+    try {
+      await bridge.declareRest(offset);
+      audio.oracleWhisper();
+      await refresh();
+    } catch (e) {
+      audio.declineThud();
+      pushToast("error", "REST", String(e));
+    }
+  };
 
   const submitProof = async () => {
     if (!proofFor) return;
@@ -80,14 +105,37 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
 
   return (
     <div>
-      <div className="page-heading">
-        <h1>
-          {t("nav.today")}, {new Date().toLocaleDateString(undefined, { day: "2-digit", month: "long" })}
-        </h1>
-        <div className="sub">
-          {t("today.sub")} · {t("camp.chapter")} {p.current_level}: {p.level_title}
+      <div className="page-heading" style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <h1>
+            {t("nav.today")}, {new Date().toLocaleDateString(undefined, { day: "2-digit", month: "long" })}
+          </h1>
+          <div className="sub">
+            {t("today.sub")} · {t("camp.chapter")} {p.current_level}: {t(`ch.${p.current_level}.t`)}
+          </div>
         </div>
+        <button className="btn small" title="F" onClick={() => { audio.uiOpen(); setFocusMode(true); }}>
+          <Maximize2 /> {t("focus.enter")}
+        </button>
+        <button className="btn small" disabled={snap.rest_tokens <= 0 || snap.today_is_rest}
+          onClick={() => setRestConfirm(true)}>
+          <BedDouble /> {t("rest.declare")} (<span className="mono-latin">{snap.rest_tokens}</span>)
+        </button>
       </div>
+
+      {snap.today_is_rest && (
+        <div className="panel" style={{
+          marginBottom: 16, borderColor: "var(--steel)", padding: "14px 20px",
+          background: "linear-gradient(90deg, rgba(142,167,189,.08), var(--bg1) 60%)",
+        }}>
+          <div style={{ fontFamily: "var(--font-display)", letterSpacing: 2, fontSize: 15, color: "var(--steel)" }}>
+            {t("rest.activeBanner")}
+          </div>
+        </div>
+      )}
+      {!snap.today_is_rest && snap.tomorrow_is_rest && (
+        <div className="hint" style={{ marginBottom: 12 }}>{t("rest.tomorrowNote")}</div>
+      )}
 
       {(snap.gate.reckoning_ready || snap.gate.forceable) && (
         <div
@@ -209,6 +257,8 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
             )}
           </div>
 
+          <QuestsPanel />
+
           {ambient && (
             <div className="panel">
               <div className="panel-title">{t("today.oracleWatches")}</div>
@@ -243,7 +293,7 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
             {snap.bosses.map((b) => (
               <div key={b.id} className={`boss-card${b.defeated ? " defeated" : ""}`}
                 style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <div className={`portrait-frame${b.defeated ? " gold" : ""}`}
+                <div className={`portrait-frame${b.defeated ? " gold" : ""}${woundClass(b.completion, b.defeated)}`}
                   style={{ width: 54, height: 54, minWidth: 54 }}>
                   <SpriteAnim sheet={bossSheet(b.sector, b.level)} height={40} />
                 </div>
@@ -309,6 +359,51 @@ export function TodayPage({ setView }: { setView: ViewSetter }) {
             </button>
           </div>
         </Modal>
+      )}
+
+      {restConfirm && (
+        <Modal title={t("rest.confirmTitle")} onClose={() => setRestConfirm(false)}>
+          <div className="law-prose">{t("rest.confirmBody")}</div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setRestConfirm(false)}>{t("act.cancel")}</button>
+            {!snap.tomorrow_is_rest && (
+              <button className="btn" onClick={() => void declareRestDay(1)}>
+                <BedDouble /> {t("rest.tomorrow")}
+              </button>
+            )}
+            <button className="btn primary" onClick={() => void declareRestDay(0)}>
+              <BedDouble /> {t("rest.today")}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {focusMode && (
+        <div className="focus-veil" onClick={(e) => { if (e.target === e.currentTarget) setFocusMode(false); }}>
+          <div className="focus-inner">
+            <div className="mono-latin" style={{ textAlign: "center", color: "var(--text-faint)", fontSize: 10, letterSpacing: 2, marginBottom: 20 }}>
+              {t("focus.exit")}
+            </div>
+            {due.length === 0 ? (
+              <div className="empty-slate" style={{ fontSize: 18 }}>{t("today.nothingDue")}</div>
+            ) : (
+              due.map((h, i) => (
+                <div key={h.id} className="focus-row">
+                  <span className="mono-latin" style={{ color: "var(--text-faint)", fontSize: 18, width: 30 }}>{i + 1}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 20 }}>{h.name}</div>
+                    <div className="directive-numbers" style={{ marginTop: 4 }}>
+                      <SectorTag sector={h.sector} /> <WeightTag weight={h.weight} />
+                    </div>
+                  </div>
+                  <button className="btn primary big" onClick={() => startExecution(h)}>
+                    <Swords /> {t("act.execute")}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

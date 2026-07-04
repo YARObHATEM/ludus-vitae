@@ -365,6 +365,75 @@ pub fn global_progress(bosses: &[(f64, f64, Sector)]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// The Difficulty law — one switch, three worlds. Everything else identical.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DifficultyParams {
+    /// Night-close multiplier per missed weight unit (lower = crueler).
+    pub miss_decay_base: f64,
+    /// Friction interest rate before INT relief.
+    pub friction_base: f64,
+    /// Rest tokens granted at genesis and each chapter advance.
+    pub rest_tokens: i64,
+}
+
+pub fn difficulty_params(name: &str) -> DifficultyParams {
+    match name {
+        "casual" => DifficultyParams { miss_decay_base: 0.94, friction_base: 1.20, rest_tokens: 6 },
+        "brutal" => DifficultyParams { miss_decay_base: 0.86, friction_base: 1.40, rest_tokens: 2 },
+        _ => DifficultyParams {
+            miss_decay_base: MOMENTUM_MISS_BASE,
+            friction_base: FRICTION_BASE,
+            rest_tokens: 4,
+        },
+    }
+}
+
+/// Difficulty-aware miss decay (the standard-path function below keeps the
+/// canonical constant for tests and default play).
+pub fn momentum_after_misses_at(m: f64, missed_weight_sum: f64, decay_base: f64) -> f64 {
+    if missed_weight_sum <= 0.0 {
+        return clamp_momentum(m);
+    }
+    clamp_momentum(m * decay_base.powf(missed_weight_sum))
+}
+
+/// Difficulty-aware activation cost.
+pub fn activation_cost_at(
+    w: WeightClass,
+    consecutive_misses: i64,
+    momentum: f64,
+    cursed: bool,
+    stat_int: i64,
+    friction_base_at: f64,
+) -> f64 {
+    let fb = (friction_base_at - FRICTION_INT_RELIEF * (stat_int - 10) as f64).max(FRICTION_FLOOR);
+    let exp = consecutive_misses.clamp(0, FRICTION_CAP_EXP) as f64;
+    let curse = if cursed { CURSE_STAMINA_MULT } else { 1.0 };
+    let m = clamp_momentum(momentum);
+    round2(base_activation_cost(w) * fb.powf(exp) * curse / m.sqrt())
+}
+
+// ---------------------------------------------------------------------------
+// The Quest law — one-shot goals are pure carrot. No deadline punishment,
+// no friction, no rust: a quest abandoned costs nothing but its own absence.
+// ---------------------------------------------------------------------------
+
+/// Momentum reward for completing a quest: 1.5× the directive gain — a
+/// finished goal outweighs a daily rep. Completed past its deadline, the
+/// reward halves (late is still done; done late is still honest).
+pub fn quest_momentum_gain(w: WeightClass, late: bool) -> f64 {
+    let g = momentum_gain(w) * 1.5;
+    round2(if late { g * 0.5 } else { g })
+}
+
+/// Stat XP banked by a completed quest.
+pub fn quest_xp(w: WeightClass) -> f64 {
+    25.0 * weight_mult(w)
+}
+
+// ---------------------------------------------------------------------------
 // The Recommended Action law
 // ---------------------------------------------------------------------------
 
@@ -693,5 +762,30 @@ mod tests {
         assert!(reckoning_ready(40.0, None));
         assert!(!reckoning_ready(80.0, Some(6)));
         assert!(reckoning_ready(80.0, Some(7)));
+    }
+
+    #[test]
+    fn difficulty_reshapes_the_world() {
+        let casual = difficulty_params("casual");
+        let brutal = difficulty_params("brutal");
+        let std = difficulty_params("standard");
+        assert!((std.miss_decay_base - MOMENTUM_MISS_BASE).abs() < EPS);
+        // One missed STANDARD habit at M=2.0: casual bleeds less than brutal.
+        let mc = momentum_after_misses_at(2.0, 1.0, casual.miss_decay_base);
+        let mb = momentum_after_misses_at(2.0, 1.0, brutal.miss_decay_base);
+        assert!(mc > mb);
+        // Friction interest compounds harder on brutal.
+        let cc = activation_cost_at(WeightClass::Standard, 3, 1.0, false, 10, casual.friction_base);
+        let cb = activation_cost_at(WeightClass::Standard, 3, 1.0, false, 10, brutal.friction_base);
+        assert!(cb > cc);
+        assert!(casual.rest_tokens > brutal.rest_tokens);
+    }
+
+    #[test]
+    fn quests_are_pure_carrot() {
+        // 1.5× the directive gain, halved when late — never negative.
+        assert!((quest_momentum_gain(WeightClass::Mythic, false) - 0.30).abs() < EPS);
+        assert!((quest_momentum_gain(WeightClass::Mythic, true) - 0.15).abs() < EPS);
+        assert!((quest_xp(WeightClass::Heroic) - 37.5).abs() < EPS);
     }
 }

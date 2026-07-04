@@ -10,7 +10,7 @@ import { useSystem } from "../state/SystemProvider";
 import { useI18n } from "../i18n/I18nProvider";
 import { Gauge, Modal, ProofField, SectorTag } from "../components/ui";
 import { OracleDraftModal } from "../components/OracleDraftModal";
-import { SpriteAnim, bossSheet } from "../components/SpriteAnim";
+import { SpriteAnim, bossSheet, woundClass } from "../components/SpriteAnim";
 import type { BossView, MilestoneView, VerificationType } from "../types/contracts";
 
 export function CampaignPage() {
@@ -147,7 +147,7 @@ export function CampaignPage() {
       <div>
         {crumbs}
         <div className="panel" style={{ display: "flex", gap: 22, alignItems: "flex-start" }}>
-          <div className={`portrait-frame big${b.defeated ? " gold" : ""}`}>
+          <div className={`portrait-frame big${b.defeated ? " gold" : ""}${woundClass(b.completion, b.defeated)}`}>
             <SpriteAnim sheet={bossSheet(b.sector, b.level)} height={110} />
           </div>
           <div style={{ flex: 1 }}>
@@ -256,7 +256,7 @@ export function CampaignPage() {
               {bosses.map((b) => (
                 <div key={b.id} className={`boss-door${b.defeated ? " defeated" : ""}`}
                   onClick={() => { setOpenBossId(b.id); audio.uiOpen(); }}>
-                  <div className={`portrait-frame${b.defeated ? " gold" : ""}`}>
+                  <div className={`portrait-frame${b.defeated ? " gold" : ""}${woundClass(b.completion, b.defeated)}`}>
                     <SpriteAnim sheet={bossSheet(b.sector, b.level)} height={70} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>

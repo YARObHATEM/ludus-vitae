@@ -11,6 +11,7 @@ import { CharacterPage } from "./pages/Character";
 import { ChroniclePage } from "./pages/Chronicle";
 import { DomainsPage } from "./pages/Domains";
 import { GenesisRitual } from "./pages/GenesisRitual";
+import { JournalPage } from "./pages/Journal";
 import { OraclePage } from "./pages/OraclePage";
 import { SettingsPage } from "./pages/Settings";
 import { TodayPage } from "./pages/Today";
@@ -28,7 +29,7 @@ export default function App() {
   useEffect(() => {
     if (!startupApplied && settings.startup_view) {
       const v = settings.startup_view as ViewKey;
-      if (["today", "domains", "campaign", "character", "arsenal", "chronicle", "oracle", "settings"].includes(v)) {
+      if (["today", "domains", "campaign", "character", "arsenal", "journal", "chronicle", "oracle", "settings"].includes(v)) {
         setView(v);
       }
       setStartupApplied(true);
@@ -97,6 +98,7 @@ export default function App() {
           {view === "campaign" && <CampaignPage />}
           {view === "character" && <CharacterPage />}
           {view === "arsenal" && <ArsenalPage />}
+          {view === "journal" && <JournalPage />}
           {view === "chronicle" && <ChroniclePage />}
           {view === "oracle" && <OraclePage />}
           {view === "settings" && <SettingsPage />}

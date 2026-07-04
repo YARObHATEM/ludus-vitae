@@ -194,6 +194,50 @@ export interface RecommendedAction {
   reason: string;
 }
 
+export interface QuestView {
+  id: number;
+  title: string;
+  description: string;
+  sector: Sector;
+  weight: WeightClass;
+  verification: VerificationType;
+  deadline_day: string | null;
+  created_day: string;
+  completed_at: string | null;
+  is_abandoned: boolean;
+  overdue: boolean;
+  momentum_reward: number;
+  xp_reward: number;
+}
+
+export interface JournalEntryView {
+  id: number;
+  timestamp: string;
+  day_key: string;
+  sector: Sector | null;
+  content: string;
+  oracle_reflection: string | null;
+}
+
+export interface NewQuestPayload {
+  title: string;
+  description: string;
+  sector: Sector;
+  weight: WeightClass;
+  verification: VerificationType;
+  deadline_day: string | null;
+}
+
+export interface QuestReport {
+  quest_id: number;
+  title: string;
+  late: boolean;
+  momentum_before: number;
+  momentum_after: number;
+  xp_banked: number;
+  sharpness_after: number;
+}
+
 export interface SystemSnapshot {
   profile: ProfileView;
   weapon: WeaponView;
@@ -209,6 +253,11 @@ export interface SystemSnapshot {
   audio: AudioLaw;
   projection: Projection;
   recommended: RecommendedAction | null;
+  quests: QuestView[];
+  rest_tokens: number;
+  today_is_rest: boolean;
+  tomorrow_is_rest: boolean;
+  difficulty: string;
   recent_days: DayRecord[];
   recent_logs: ExecutionLogView[];
   unseen_events: SystemEvent[];

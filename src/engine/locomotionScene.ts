@@ -79,6 +79,8 @@ export class LocomotionScene {
   private rainDrops: Graphics[] = [];
   private motes: Graphics[] = [];
   private fogOverlay = new Graphics();
+  private timeOverlay = new Graphics();
+  private lastHourChecked = -1;
   private loadFailed = false;
 
   private distance = 0;
@@ -237,8 +239,31 @@ export class LocomotionScene {
       this.motes.push(mote);
     }
 
+    // Real-clock day/night tint sits under the momentum fog.
+    this.root.addChild(this.timeOverlay);
     this.root.addChild(this.fogOverlay);
     this.layout();
+  }
+
+  /** Tint the world by the actual local hour: the road exists in real time. */
+  private applyTimeOfDay() {
+    const hour = new Date().getHours();
+    if (hour === this.lastHourChecked) return;
+    this.lastHourChecked = hour;
+    const W = this.app.screen.width;
+    const H = this.app.screen.height;
+    this.timeOverlay.clear();
+    if (hour >= 21 || hour < 5) {
+      // Deep night — cold blue veil.
+      this.timeOverlay.rect(0, 0, W, H).fill({ color: 0x0a1230, alpha: 0.32 });
+    } else if (hour >= 18) {
+      // Dusk — ember wash.
+      this.timeOverlay.rect(0, 0, W, H).fill({ color: 0xb35b26, alpha: 0.12 });
+    } else if (hour < 8) {
+      // Dawn — pale gold.
+      this.timeOverlay.rect(0, 0, W, H).fill({ color: 0xd9a75b, alpha: 0.08 });
+    }
+    // Midday: no veil.
   }
 
   private groundTop(): number {
@@ -267,6 +292,7 @@ export class LocomotionScene {
     this.fogOverlay.clear();
     this.fogOverlay.rect(0, 0, W, H).fill(0x767e92);
     this.fogOverlay.alpha = 0;
+    this.lastHourChecked = -1; // force day/night redraw at the new size
   }
 
   // ------------------------------------------------------------- state in
@@ -439,6 +465,8 @@ export class LocomotionScene {
     // The cognitive fog thickens as momentum dies.
     const fogTarget = Math.max(0, Math.min(0.38, (1.15 - this.momentum) * 0.36));
     this.fogOverlay.alpha += (fogTarget - this.fogOverlay.alpha) * 0.03;
+
+    this.applyTimeOfDay();
   }
 
   destroy() {

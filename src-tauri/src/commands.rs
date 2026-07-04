@@ -155,6 +155,100 @@ pub fn mark_events_seen(db: State<Db>) -> CmdResult<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_quest(db: State<Db>, payload: NewQuestPayload) -> CmdResult<i64> {
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::create_quest(&conn, payload).map_err(rule)
+}
+
+#[tauri::command]
+pub fn complete_quest(
+    db: State<Db>,
+    quest_id: i64,
+    proof_path: Option<String>,
+) -> CmdResult<QuestReport> {
+    let mut conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::complete_quest(&mut conn, quest_id, proof_path).map_err(rule)
+}
+
+#[tauri::command]
+pub fn abandon_quest(db: State<Db>, quest_id: i64) -> CmdResult<()> {
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::abandon_quest(&conn, quest_id).map_err(rule)
+}
+
+// ---------------------------------------------------------------------------
+// Rest days
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn declare_rest(db: State<Db>, day_offset: i64) -> CmdResult<()> {
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::declare_rest(&conn, day_offset).map_err(rule)
+}
+
+// ---------------------------------------------------------------------------
+// Journal
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn add_journal_entry(
+    db: State<Db>,
+    content: String,
+    sector: Option<Sector>,
+) -> CmdResult<i64> {
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::add_journal_entry(&conn, &content, sector).map_err(rule)
+}
+
+#[tauri::command]
+pub fn get_journal(db: State<Db>, limit: i64, offset: i64) -> CmdResult<Vec<JournalEntryView>> {
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::load_journal(&conn, limit, offset).map_err(rule)
+}
+
+/// The Oracle reads a journal entry against the live snapshot. Remote when a
+/// key is sealed; otherwise the offline deterministic voice. The reflection
+/// is stored on the entry either way.
+#[tauri::command]
+pub async fn reflect_on_journal(db: State<'_, Db>, entry_id: i64) -> CmdResult<String> {
+    let (snap, model, content) = {
+        let mut conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+        engine::ensure_profile(&conn).map_err(rule)?;
+        let today = chrono::Local::now().date_naive();
+        engine::process_pending_days(&mut conn, today).map_err(rule)?;
+        let content: String = conn
+            .query_row(
+                "SELECT content FROM journal_entries WHERE id = ?1",
+                params![entry_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| "Unknown journal entry.".to_string())?;
+        let model =
+            db::get_setting(&conn, "oracle_model").unwrap_or_else(|| oracle::DEFAULT_MODEL.into());
+        let configured = oracle::load_api_key().is_some();
+        let snap = snapshot::build_snapshot(&conn, &db.db_path.to_string_lossy(), configured, model.clone())
+            .map_err(rule)?;
+        (snap, model, content)
+    };
+
+    let reflection = match oracle::load_api_key() {
+        Some(key) => match oracle::reflect_on_journal_remote(&model, &key, &content, &snap).await {
+            Ok(r) => r,
+            Err(_) => oracle::reflect_on_journal_local(&content, &snap),
+        },
+        None => oracle::reflect_on_journal_local(&content, &snap),
+    };
+
+    let conn = db.conn.lock().map_err(|_| "state lock poisoned")?;
+    engine::store_journal_reflection(&conn, entry_id, &reflection).map_err(rule)?;
+    Ok(reflection)
+}
+
+// ---------------------------------------------------------------------------
 // Chronicle history
 // ---------------------------------------------------------------------------
 
@@ -437,6 +531,7 @@ pub fn get_settings(db: State<Db>) -> CmdResult<HashMap<String, String>> {
     map.entry("startup_view".into()).or_insert("today".into());
     map.entry("oracle_model".into())
         .or_insert(oracle::DEFAULT_MODEL.into());
+    map.entry("difficulty".into()).or_insert("standard".into());
     map.insert("vault_root".into(), db.vault_root.to_string_lossy().to_string());
     map.insert("db_path".into(), db.db_path.to_string_lossy().to_string());
     Ok(map)
@@ -452,6 +547,7 @@ pub fn set_app_setting(db: State<Db>, key: String, value: String) -> CmdResult<(
         "confirm_destructive",
         "startup_view",
         "oracle_model",
+        "difficulty",
     ];
     if !ALLOWED.contains(&key.as_str()) {
         return Err(format!("Unknown setting key: {key}"));

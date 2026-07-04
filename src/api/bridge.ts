@@ -10,6 +10,10 @@ import type {
   ExecutionReport,
   ForceGateReport,
   GenesisPayload,
+  JournalEntryView,
+  NewQuestPayload,
+  QuestReport,
+  Sector,
   MilestoneReport,
   NewHabitPayload,
   OracleLogView,
@@ -73,6 +77,23 @@ export const bridge = {
     invoke<ProposedMilestone[]>("propose_milestones", { bossId, goalText }),
 
   markEventsSeen: () => invoke<void>("mark_events_seen"),
+
+  createQuest: (payload: NewQuestPayload) => invoke<number>("create_quest", { payload }),
+
+  completeQuest: (questId: number, proofPath?: string | null) =>
+    invoke<QuestReport>("complete_quest", { questId, proofPath: proofPath ?? null }),
+
+  abandonQuest: (questId: number) => invoke<void>("abandon_quest", { questId }),
+
+  declareRest: (dayOffset: 0 | 1) => invoke<void>("declare_rest", { dayOffset }),
+
+  addJournalEntry: (content: string, sector?: Sector | null) =>
+    invoke<number>("add_journal_entry", { content, sector: sector ?? null }),
+
+  getJournal: (limit: number, offset: number) =>
+    invoke<JournalEntryView[]>("get_journal", { limit, offset }),
+
+  reflectOnJournal: (entryId: number) => invoke<string>("reflect_on_journal", { entryId }),
 
   getChronicle: (limit: number, offset: number) =>
     invoke<ExecutionLogView[]>("get_chronicle", { limit, offset }),

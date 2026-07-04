@@ -194,6 +194,16 @@ export function SettingsPage() {
         <div className="panel">
           <div className="panel-title">{t("set.gameplay")}</div>
           <label className="field">
+            <span className="field-label">{t("diff.label")}</span>
+            <select value={settings.difficulty ?? "standard"}
+              onChange={(e) => void setSetting("difficulty", e.target.value)}>
+              <option value="casual">{t("diff.casual")}</option>
+              <option value="standard">{t("diff.standard")}</option>
+              <option value="brutal">{t("diff.brutal")}</option>
+            </select>
+          </label>
+          <div className="hint" style={{ marginBottom: 12 }}>{t("diff.hint")}</div>
+          <label className="field">
             <span className="field-label">{t("set.reducedMotion")}</span>
             <select value={settings.reduced_motion ?? "false"}
               onChange={(e) => void setSetting("reduced_motion", e.target.value)}>

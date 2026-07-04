@@ -23,6 +23,9 @@ pub fn build_snapshot(
     let p = engine::load_profile(conn)?;
     let w = engine::load_weapon(conn)?;
     let level_def = catalog::level_def(p.level);
+    let diff = engine::difficulty(conn);
+    let difficulty_name =
+        crate::db::get_setting(conn, "difficulty").unwrap_or_else(|| "standard".into());
 
     // ---- Habits with live derived state --------------------------------
     let habit_rows = engine::load_habits(conn, true)?;
@@ -65,7 +68,9 @@ pub fn build_snapshot(
             due_today: h.due_on(today) && executed_today == 0,
             executed_today: executed_today > 0,
             in_window_now: h.in_window(hour),
-            activation_cost: f::activation_cost(h.weight, h.consecutive_misses, p.momentum, cursed, p.stat_int()),
+            activation_cost: f::activation_cost_at(
+                h.weight, h.consecutive_misses, p.momentum, cursed, p.stat_int(), diff.friction_base,
+            ),
             momentum_gain: f::momentum_gain(h.weight),
             cursed,
             last_executed_day: h.last_executed_day.map(engine::day_key),
@@ -200,7 +205,7 @@ pub fn build_snapshot(
         .filter(|h| h.due_today && !h.is_archived)
         .map(|h| f::weight_mult(h.weight))
         .sum();
-    let m_if_missed = f::momentum_after_misses(p.momentum, missed_weight);
+    let m_if_missed = f::momentum_after_misses_at(p.momentum, missed_weight, diff.miss_decay_base);
 
     // ---- The Recommended Action law ----------------------------------------
     let mut recommended: Option<RecommendedAction> = None;
@@ -363,6 +368,11 @@ pub fn build_snapshot(
             sharpness_if_all_executed: f::round2(sharp_if_all),
         },
         recommended,
+        quests: engine::load_active_quests(conn, today)?,
+        rest_tokens: p.rest_tokens,
+        today_is_rest: engine::is_rest_day(conn, today),
+        tomorrow_is_rest: engine::is_rest_day(conn, today + chrono::Duration::days(1)),
+        difficulty: difficulty_name,
         recent_days,
         recent_logs,
         unseen_events,

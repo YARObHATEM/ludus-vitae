@@ -167,6 +167,39 @@ ALTER TABLE habit_configs ADD COLUMN sworn_boss_id INTEGER REFERENCES boss_campa
 ALTER TABLE boss_campaigns ADD COLUMN siege_dealt REAL NOT NULL DEFAULT 0;
 ALTER TABLE user_profiles ADD COLUMN last_reckoning_day TEXT;
 "#,
+),
+(
+    "0003_quests_rest_journal",
+    r#"
+CREATE TABLE IF NOT EXISTS quests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    sector_type TEXT NOT NULL CHECK (sector_type IN ('FINANCIAL','INTELLECTUAL','PHYSICAL','RESPONSIBILITY')),
+    weight_class TEXT NOT NULL CHECK (weight_class IN ('TRIVIAL','STANDARD','HEROIC','MYTHIC')),
+    verification_type TEXT NOT NULL CHECK (verification_type IN ('IMAGE','FILE','MANUAL')),
+    deadline_day TEXT,
+    created_day TEXT NOT NULL,
+    completed_at TEXT,
+    proof_path TEXT,
+    is_abandoned INTEGER NOT NULL DEFAULT 0 CHECK (is_abandoned IN (0,1))
+);
+
+CREATE TABLE IF NOT EXISTS journal_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    sector_type TEXT CHECK (sector_type IN ('FINANCIAL','INTELLECTUAL','PHYSICAL','RESPONSIBILITY')),
+    content TEXT NOT NULL,
+    oracle_reflection TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rest_days (
+    day_key TEXT PRIMARY KEY
+);
+
+ALTER TABLE user_profiles ADD COLUMN rest_tokens INTEGER NOT NULL DEFAULT 4;
+"#,
 )];
 
 /// Burn the world: erase all game state, keep application settings and the
@@ -180,6 +213,9 @@ pub fn reset_world(conn: &Connection) -> Result<(), rusqlite::Error> {
          DELETE FROM system_days;
          DELETE FROM system_events;
          DELETE FROM oracle_logs;
+         DELETE FROM quests;
+         DELETE FROM journal_entries;
+         DELETE FROM rest_days;
          DELETE FROM local_weapon_metrics;
          DELETE FROM user_profiles;",
     )
